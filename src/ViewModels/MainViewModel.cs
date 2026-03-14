@@ -1,10 +1,9 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Tasks;
-using SimpleWifi.Win32;
 
 namespace AirMaster7pConnect.ViewModels;
 
@@ -87,29 +86,30 @@ public class MainViewModel : BaseViewModel
 
     public async void UseCurrentConnection()
     {
-        var wifiInterface = GetWifiInterface();
-        if (wifiInterface == null)
+        try
         {
-            await SetContentAsync("Cannot find any available WiFi adapter");
-            return;
+            var process = new Process();
+            process.StartInfo.FileName = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
+            process.StartInfo.Arguments = "-I";
+            process.StartInfo.RedirectStandardOutput = true;
+            process.StartInfo.UseShellExecute = false;
+            process.Start();
+            var output = await process.StandardOutput.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("SSID:"))
+                    Ssid = trimmed.Substring(5).Trim();
+                else if (trimmed.StartsWith("BSSID:"))
+                    Bssid = trimmed.Substring(6).Trim();
+            }
         }
-        
-        var wlan = new WlanClient();
-        foreach (var wifi in wlan.Interfaces)
+        catch
         {
-            if (wifi.NetworkInterface.Id != wifiInterface.Id)
-                continue;
-
-            var connection = wifi.CurrentConnection.wlanAssociationAttributes;
-            int length = connection.dot11Ssid.SSID.AsSpan().IndexOf((byte)0);
-            Ssid = Encoding.UTF8.GetString(connection.dot11Ssid.SSID, 0, length);
-            Bssid = string.Join(":", connection.dot11Bssid.Select(x => $"{x:X2}"));
-            if ((int)connection.dot11PhyType > 7)
-                await SetContentAsync("AirMaster can't connect to 5GHz Wi-Fi.\nReconnect to 2.4Ghz or fill fields manually.");
+            await SetContentAsync("Could not detect WiFi. Fill in fields manually.");
         }
-
-        if (Content is string)
-            await SetContentAsync(null);
     }
 
     private static NetworkInterface? GetWifiInterface()
