@@ -3,7 +3,12 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
+#if IS_WINDOWS
+using SimpleWifi.Win32;
+#endif
 
 namespace AirMaster7pConnect.ViewModels;
 
@@ -51,7 +56,7 @@ public class MainViewModel : BaseViewModel
 
         return ValueTask.CompletedTask;
     }
-    
+
     public async void Connect()
     {
         if (!PhysicalAddress.TryParse(Bssid.Replace(':', '-'), out var bssid))
@@ -59,20 +64,20 @@ public class MainViewModel : BaseViewModel
             await SetContentAsync("BSSID format invalid (example: 01:02:03:04:05:06)");
             return;
         }
-        
+
         var wifiInterface = GetWifiInterface();
         if (wifiInterface == null)
         {
             await SetContentAsync("Cannot find any available WiFi adapter");
             return;
         }
-        
+
         var localAddress = wifiInterface.GetIPProperties()
             .UnicastAddresses
             .Where(x => x.Address.AddressFamily == AddressFamily.InterNetwork)
             .Select(x => x.Address)
             .FirstOrDefault();
-        
+
         if(localAddress == null)
         {
             await SetContentAsync($"Cannot find IPv4 address for WiFi interface: {wifiInterface.Name}");
@@ -85,6 +90,14 @@ public class MainViewModel : BaseViewModel
     }
 
     public async void UseCurrentConnection()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            await UseCurrentConnectionMacOS();
+        else
+            await UseCurrentConnectionWindows();
+    }
+
+    private async Task UseCurrentConnectionMacOS()
     {
         try
         {
@@ -110,6 +123,37 @@ public class MainViewModel : BaseViewModel
         {
             await SetContentAsync("Could not detect WiFi. Fill in fields manually.");
         }
+    }
+
+    private async Task UseCurrentConnectionWindows()
+    {
+#if IS_WINDOWS
+        var wifiInterface = GetWifiInterface();
+        if (wifiInterface == null)
+        {
+            await SetContentAsync("Cannot find any available WiFi adapter");
+            return;
+        }
+
+        var wlan = new WlanClient();
+        foreach (var wifi in wlan.Interfaces)
+        {
+            if (wifi.NetworkInterface.Id != wifiInterface.Id)
+                continue;
+
+            var connection = wifi.CurrentConnection.wlanAssociationAttributes;
+            int length = connection.dot11Ssid.SSID.AsSpan().IndexOf((byte)0);
+            Ssid = Encoding.UTF8.GetString(connection.dot11Ssid.SSID, 0, length);
+            Bssid = string.Join(":", connection.dot11Bssid.Select(x => $"{x:X2}"));
+            if ((int)connection.dot11PhyType > 7)
+                await SetContentAsync("AirMaster can't connect to 5GHz Wi-Fi.\nReconnect to 2.4Ghz or fill fields manually.");
+        }
+
+        if (Content is string)
+            await SetContentAsync(null);
+#else
+        await SetContentAsync("WiFi detection is not supported on this platform. Fill in fields manually.");
+#endif
     }
 
     private static NetworkInterface? GetWifiInterface()
