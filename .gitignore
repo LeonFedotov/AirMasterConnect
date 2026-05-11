@@ -397,3 +397,12 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# macOS
+.DS_Store
+
+# Captured sensor data (runtime artifacts)
+airmaster_data/
+
+# Proprietary firmware/tools — not for redistribution
+resources/
